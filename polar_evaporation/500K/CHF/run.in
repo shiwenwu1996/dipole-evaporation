@@ -1,0 +1,161 @@
+
+shell rm -rf dump
+shell mkdir dump
+
+restart 1000 rst.1 rst.2
+
+units      metal
+atom_style full
+
+pair_style hybrid airebo 3.0 lj/cut/coul/long 12.0 
+
+
+bond_style harmonic
+angle_style harmonic
+
+
+read_data npt.data
+
+
+change_box all z final -50 70 boundary p p f units box
+
+# Original model from Berendsen et al, J Phys Chem 91:6269 (1987)
+# Charges and geometry are specified in the "data." file.
+
+mass 1 12.010000 # C
+mass 2 1.00794 # H
+mass 3 18.998403 # F
+mass 4 1.00794 # H
+mass 5 15.9994 # O
+mass 6 12.010000 # C
+
+
+kspace_style pppm 1.0e-5
+kspace_modify slab 3.0
+
+pair_coeff * * airebo CH.airebo NULL NULL NULL NULL NULL C
+# 0.002390 3.412  Effect of Covalent Functionalization on Thermal Transport across Graphene-Polymer Interfaces
+pair_coeff 1 1 lj/cut/coul/long 0.004703    3.15
+pair_coeff 2 2 lj/cut/coul/long 0.0006805   2.2293
+pair_coeff 3 3 lj/cut/coul/long 0.00379     2.94
+# CH2F2
+pair_coeff 1 2 lj/cut/coul/long 0.001789    2.6897   
+pair_coeff 1 3 lj/cut/coul/long 0.004222    3.0965
+pair_coeff 1 4 lj/cut/coul/long 0.000000    1.575
+pair_coeff 1 5 lj/cut/coul/long 0.005629    3.158
+pair_coeff 1 6 lj/cut/coul/long 0.003353    3.281
+# Calculated by L-B mixing rule
+pair_coeff 2 3 lj/cut/coul/long 0.001606    2.58465
+pair_coeff 2 4 lj/cut/coul/long 0.000000    1.1147
+pair_coeff 2 5 lj/cut/coul/long 0.002141    2.6977
+pair_coeff 2 6 lj/cut/coul/long 0.001275    2.8207
+
+pair_coeff 3 4 lj/cut/coul/long 0.000000    1.47
+pair_coeff 3 5 lj/cut/coul/long 0.005053    3.053
+pair_coeff 3 6 lj/cut/coul/long 0.00301     3.176
+
+
+pair_coeff 4 4 lj/cut/coul/long  0.0000000000   0.000 # H H 
+pair_coeff 4 5 lj/cut/coul/long  0.0000000000   0.000 # H O 
+pair_coeff 5 5 lj/cut/coul/long  0.0067366153   3.166 # coverted real to metal # O O 
+
+
+pair_coeff 4 6 lj/cut/coul/long  0.00000000     0.000 # H and C
+pair_coeff 5 6 lj/cut/coul/long  0.00406279     3.19  # O and C
+
+
+bond_coeff 1 15.2654 1.094
+bond_coeff 2 16.0088 1.369
+bond_coeff 3 0.0 1.0
+
+
+angle_coeff 1 2.5902 108.6
+angle_coeff 2 1.51878 113.6
+angle_coeff 3 3.8100 108.7
+angle_coeff 4 0.0 109.47
+
+# group hydrogen type 1
+# group oxygen type 2
+group CHF type 1 2 3
+group water type 4 5 
+group graphene id 3201:3620 
+group top id 3621:4040
+
+delete_atoms group top 
+
+region AC block INF INF INF INF 60 70
+
+fix rewall CHF wall/reflect zhi 60
+
+fix tether graphene spring/self 2.925
+
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+
+# minimize 1.0e-4 1.0e-6 100 1000
+
+timestep 	   0.001
+
+# group lower id 4551:4971
+
+
+# fix 001 lower rigid single reinit yes
+
+
+
+fix constrain water shake 1.0e-4 100 0 b 3 a 4
+# fix removeMomentum water momentum 1 linear 1 1 1
+
+velocity all create 300.0 4928459 rot yes dist gaussian
+write_data first.data
+
+# fix NVE all nve
+# fix LAN   all langevin 300 300 0.2 699483
+
+
+# thermo           1000
+# thermo_style custom step temp etotal ke pe  press  pxx pyy pzz   lx ly lz 
+# dump             1 all custom 1000  ./dump/nve_lan.lammpstrj id type x y z vx vy vz fx fy fz 
+# run				 500000
+
+
+# write_restart    ./dump/nve_lan.rst
+# write_data       ./dump/nve_lan.data
+# undump 1 
+# unfix LAN 
+# unfix NVE
+
+# fix				 ENVT all nvt temp  300 300 0.2
+# thermo           1000
+# thermo_style custom step temp etotal ke pe  press  pxx pyy pzz   lx ly lz 
+# dump             1 all custom 1000  ./dump/nvt01.lammpstrj id type x y z vx vy vz fx fy fz 
+# run				 1000000
+# write_restart    ./dump/nvt01.rst
+# write_data       ./dump/nvt01.data
+# undump 1 
+# unfix   	     ENVT
+
+variable num_atom equal atoms
+
+compute IE CHF group/group water
+# compute cc1 all chunk/atom bin/1d z lower 50 units reduced
+fix CWIE all ave/time 100 10 1000 c_IE v_num_atom file inter.profile
+# fix TMP all ave/chunk 100 10 1000 cc1 temp file tmp.out
+
+
+
+fix              GLAN  graphene langevin 500 500 0.2 699483  # add temperature to graphene
+fix				 NVE all nve
+group vapor dynamic water region AC every 100
+
+
+thermo           1000
+thermo_style custom step atoms temp etotal ke pe  press  pxx pyy pzz   lx ly lz 
+dump             1 all custom 1000  ./dump/nvt02.lammpstrj id type x y z vx vy vz fx fy fz 
+run				 10000000 every 100 "delete_atoms group vapor mol yes bond yes compress yes"  # delete atoms molecules and bonds
+write_restart    ./dump/nve02.rst
+write_data       ./dump/nve02.data
+undump 1 
+unfix   	     NVE
+
+
